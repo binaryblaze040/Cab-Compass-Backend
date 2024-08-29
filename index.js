@@ -6,13 +6,15 @@ const mongoose = require("mongoose");
 const app = express();
 
 app.use(cors());
+app.use(express.json());
 
 
 // schemas
 const employeeSchema = new mongoose.Schema({
     employeeId: {
         type: String,
-        required: true
+        required: true,
+        unique: true
     },
     name: {
         type: String,
@@ -58,22 +60,34 @@ app.get("/employees", async (req, res) => {
     connectMongoDB('GET /employees');
     try {
         const employees = await EmployeeModel.find().exec();
-        res.json(employees);
+        res.status(200).json(employees);
     } catch (error) {
         console.error('Error getting employees:', error);
+        res.status(500).send('Internal Server Error');
     }
 });
 
-app.post("/employees", async (req, res) => {
-    console.log("Line 59: API hit")
-    connectMongoDB('GET /employees');
-    try {
-        const employees = await EmployeeModel.find().exec();
-        res.json(employees);
-    } catch (error) {
-        console.error('Error getting employees:', error);
+app.post('/employee', async (req, res) => {
+    connectMongoDB('POST /employees');
+
+    const { employeeId, name, email, contact, designation, address } = req.body;
+    if (!employeeId || !name || !email || !contact || !designation || !address) {
+        res.status(400).json({ error: 'All fields are required' });
     }
-});
+
+    try {
+      const newEmployee = new EmployeeModel(req.body);
+      await newEmployee.save();
+      res.status(201).json(newEmployee);
+    } catch (error) {
+        if(error.errorResponse?.errmsg?.includes("E11000")){
+            res.status(409).json({ error: error.errorResponse.errmsg });
+        }
+        else {
+            res.status(400).send({ error: error });
+        }
+    }
+  });
 
 
 app.listen(process.env.PORT || 8080);
