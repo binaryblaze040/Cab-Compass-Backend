@@ -67,18 +67,19 @@ app.get("/employees", async (req, res) => {
     }
 });
 
-app.post('/employee', async (req, res) => {
-    connectMongoDB('POST /employees');
-
+app.post('/add-employee', async (req, res) => {
+    connectMongoDB('POST /add-employee');
+    
+    console.log(req.body);
     const { employeeId, name, email, contact, designation, address } = req.body;
     if (!employeeId || !name || !email || !contact || !designation || !address) {
         res.status(400).json({ error: 'All fields are required' });
     }
 
     try {
-      const newEmployee = new EmployeeModel(req.body);
-      await newEmployee.save();
-      res.status(201).json(newEmployee);
+        const newEmployee = new EmployeeModel(req.body);
+        await newEmployee.save();
+        res.status(201).json(newEmployee);
     } catch (error) {
         if(error.errorResponse?.errmsg?.includes("E11000")){
             res.status(409).json({ error: error.errorResponse.errmsg });
@@ -87,7 +88,50 @@ app.post('/employee', async (req, res) => {
             res.status(400).send({ error: error });
         }
     }
-  });
+});
+
+app.post('/edit-employee', async (req, res) => {
+    connectMongoDB('POST /edit-employee');
+    
+    console.log(req.body);
+    const { employeeId, name, email, contact, designation, address } = req.body;
+    if (!employeeId || !name || !email || !contact || !designation || !address) {
+        res.status(400).json({ error: 'All fields are required' });
+    }
+
+    try {
+		const editEmployeeResult = await EmployeeModel.findOneAndUpdate(
+			{ employeeId: employeeId },
+			req.body,
+			{new: true}
+		);
+
+		if (editEmployeeResult) {
+			res.status(200).json(editEmployeeResult);
+		} else {
+			res.status(404).send({ error: "Employee not found" });
+		}
+    } catch (error) {
+        res.status(400).send({ error: error });
+    }
+});
+
+app.post('/delete-employee', async (req, res) => {
+    connectMongoDB('POST /delete-employee');
+    
+    console.log("Delete " + req.body);
+    try {
+		const deletionResult = await EmployeeModel.deleteOne({employeeId: req.body.employeeId})
+
+		if (deletionResult) {
+			res.status(200).json(deletionResult);
+		} else {
+			res.status(404).send({ error: "Employee not found" });
+		}
+    } catch (error) {
+        res.status(400).send({ error: error });
+    }
+});
 
 
 app.listen(process.env.PORT || 8080);
