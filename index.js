@@ -1,8 +1,12 @@
-require('dotenv').config();
+import dotenv from 'dotenv';
+import express from 'express'; 
+import cors from 'cors';
+import mongoose from "mongoose";
+import axios from 'axios';
+import { EmployeeSchema, CabSchema } from "./schema.js";
 
-const express = require("express");
-const cors = require("cors");
-const mongoose = require("mongoose");
+dotenv.config();
+
 const app = express();
 
 app.use(cors());
@@ -10,35 +14,11 @@ app.use(express.json());
 
 
 // schemas
-const employeeSchema = new mongoose.Schema({
-    employeeId: {
-        type: String,
-        required: true,
-        unique: true
-    },
-    name: {
-        type: String,
-        required: true
-    },
-    email: {
-        type: String,
-        required: true,
-        unique: true
-    },
-    contact: {
-        type: Number,
-        required: true  
-    },
-    designation: {
-        type: String
-    },
-    address: {
-        type: String,
-        required: true
-    }
-});
+const employeeSchema = new mongoose.Schema(EmployeeSchema);
+const cabSchema = new mongoose.Schema(CabSchema);
 
-const EmployeeModel = mongoose.model("employee", employeeSchema);
+const EmployeeModel = mongoose.model("Employee", employeeSchema);
+const CabModel = mongoose.model("Cab", cabSchema);
 
 
 function connectMongoDB(APIMessage) {
@@ -46,6 +26,20 @@ function connectMongoDB(APIMessage) {
     mongoose.connect(process.env.MONGO_URL)
     .then(() => console.log("MongoDB connected successfully!" + "  API - " + APIMessage))
     .catch(error => console.log("Mongo connection error: ", error));
+}
+
+async function getGeocodes(address) {
+    const url = 'https://maps.googleapis.com/maps/api/geocode/json?address=' + address + '&key=' + process.env.GOOGLE_API_KEY;
+    try {
+        const response = await axios.get(url);
+        return {
+            latitude: response.data.results[0].geometry.location.lat,
+            longitude: response.data.results[0].geometry.location.lng,
+        };
+    } catch (error) {
+        console.log(error)
+        throw new Error('Failed to fetch geocodes: ' + error.message);
+    }
 }
 
 
@@ -67,6 +61,7 @@ app.get("/employees", async (req, res) => {
     }
 });
 
+// add an employee
 app.post('/add-employee', async (req, res) => {
     connectMongoDB('POST /add-employee');
     
@@ -77,9 +72,25 @@ app.post('/add-employee', async (req, res) => {
     }
 
     try {
-        const newEmployee = new EmployeeModel(req.body);
-        await newEmployee.save();
-        res.status(201).json(newEmployee);
+        const geocodePromise = new Promise(async(resolve, reject) => {
+            try {
+                req.body.geoCode = await getGeocodes(address);
+                resolve();
+            } catch (error) {
+                reject(error);
+            }
+        });
+
+        geocodePromise
+        .then(async () => {
+            const newEmployee = new EmployeeModel(req.body);
+            await newEmployee.save();
+            res.status(201).json(newEmployee);
+        })
+        .catch(error => {
+            res.status(400).send({ error: error });
+        });
+
     } catch (error) {
         if(error.errorResponse?.errmsg?.includes("E11000")){
             res.status(409).json({ error: error.errorResponse.errmsg });
@@ -90,6 +101,7 @@ app.post('/add-employee', async (req, res) => {
     }
 });
 
+// edit an employee
 app.post('/edit-employee', async (req, res) => {
     connectMongoDB('POST /edit-employee');
     
@@ -100,22 +112,38 @@ app.post('/edit-employee', async (req, res) => {
     }
 
     try {
-		const editEmployeeResult = await EmployeeModel.findOneAndUpdate(
-			{ employeeId: employeeId },
-			req.body,
-			{new: true}
-		);
+        const geocodePromise = new Promise(async(resolve, reject) => {
+            try {
+                req.body.geoCode = await getGeocodes(address);
+                resolve();
+            } catch (error) {
+                reject(error);
+            }
+        });
 
-		if (editEmployeeResult) {
-			res.status(200).json(editEmployeeResult);
-		} else {
-			res.status(404).send({ error: "Employee not found" });
-		}
+        geocodePromise
+        .then(async () => {
+            const editEmployeeResult = await EmployeeModel.findOneAndUpdate(
+                { employeeId: employeeId },
+                req.body,
+                {new: true}
+            );
+            if (editEmployeeResult) {
+                res.status(200).json(editEmployeeResult);
+            } else {
+                res.status(404).send({ error: "Employee not found" });
+            }
+        })
+        .catch(error => {
+            res.status(400).send({ error: error });
+        });
     } catch (error) {
         res.status(400).send({ error: error });
     }
 });
 
+
+// delete an employee
 app.post('/delete-employee', async (req, res) => {
     connectMongoDB('POST /delete-employee');
     
@@ -127,6 +155,70 @@ app.post('/delete-employee', async (req, res) => {
 			res.status(200).json(deletionResult);
 		} else {
 			res.status(404).send({ error: "Employee not found" });
+		}
+    } catch (error) {
+        res.status(400).send({ error: error });
+    }
+});
+
+
+// get all cabs
+app.get("/cabs", async (req, res) => {
+    connectMongoDB('GET /cabs');
+    try {
+        const cabs = await CabModel.find().exec();
+        res.status(200).json(cabs);
+    } catch (error) {
+        console.error('Error getting cabs:', error);
+        res.status(500).send('Internal Server Error');
+    }
+});
+
+// add a cab
+app.post('/add-cab', async (req, res) => {
+    connectMongoDB('POST /add-cab');
+    
+    console.log(req.body);
+    const { registrationNumber, driverName, driverLicenseNumber, type, model, contact, capacity } = req.body;
+    if (!registrationNumber || !driverName || !driverLicenseNumber || !type || !model || !contact || !capacity) {
+        res.status(400).json({ error: 'All fields are required' });
+    }
+
+    try {
+        const newCab = new CabModel(req.body);
+        await newCab.save();
+        res.status(201).json(newCab);
+    } catch (error) {
+        if(error.errorResponse?.errmsg?.includes("E11000")){
+            res.status(409).json({ error: error.errorResponse.errmsg });
+        }
+        else {
+            res.status(400).send({ error: error });
+        }
+    }
+});
+
+// edit a cab
+app.post('/edit-cab', async (req, res) => {
+    connectMongoDB('POST /edit-cab');
+    
+    console.log(req.body);
+    const { registrationNumber, driverName, driverLicenseNumber, type, model, contact, capacity } = req.body;
+    if (!registrationNumber || !driverName || !driverLicenseNumber || !type || !model || !contact || !capacity) {
+        res.status(400).json({ error: 'All fields are required' });
+    }
+
+    try {
+		const editCabResult = await CabModel.findOneAndUpdate(
+			{ registrationNumber: registrationNumber },
+			req.body,
+			{new: true}
+		);
+
+		if (editCabResult) {
+			res.status(200).json(editCabResult);
+		} else {
+			res.status(404).send({ error: "Cab not found" });
 		}
     } catch (error) {
         res.status(400).send({ error: error });
